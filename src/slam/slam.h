@@ -30,6 +30,13 @@
 
 namespace slam {
 
+struct Pose {
+  float_t x;
+  float_t y;
+  float_t theta;
+  std::vector<Eigen::Vector2f> scan;
+};
+
 class SLAM {
  public:
   // Default Constructor.
@@ -38,7 +45,7 @@ class SLAM {
   // Called to update variables based on odometry
   void UpdateOdometry(const Eigen::Vector2f& odom_loc,
                       const float odom_angle);
-                      
+
   // Observe a new laser scan.
   void ObserveLaser(const std::vector<float>& ranges,
                     float range_min,
@@ -56,7 +63,17 @@ class SLAM {
   // Get latest robot pose.
   void GetPose(Eigen::Vector2f* loc, float* angle) const;
 
+  void GetObservedPointCloud(const std::vector<float>& ranges,
+                             float range_min,
+                             float range_max,
+                             float angle_min,
+                             float angle_max,
+                             std::vector<Eigen::Vector2f>* obs_scan_ptr);
+
  private:
+
+  // vector of previous poses
+  std::vector<Pose> poses_;
 
   // Previous odometry-reported locations.
   Eigen::Vector2f prev_odom_loc_;
@@ -78,6 +95,9 @@ class SLAM {
   float odom_accel_;
   float del_odom_angle_;
   float odom_omega_;
+
+  Eigen::Vector2f prev_update_loc_;
+  float prev_update_angle_;
 
   // A few small helper functions.
   inline float_t Vel2fToVel() const {
