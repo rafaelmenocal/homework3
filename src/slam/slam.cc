@@ -83,8 +83,11 @@ void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
   if (poses_.size() != 0) {
     Eigen::Vector2f del_trans = Eigen::Vector2f(poses_.back().x - poses_.front().x, poses_.back().y - poses_.front().y);
     float_t del_rot = abs(poses_.back().theta - poses_.front().theta);
-    
-    *loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + del_trans;
+
+    auto bl = Eigen::Rotation2Df(-poses_.front().theta) * del_trans;
+    *loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + Eigen::Rotation2Df(CONFIG_init_theta) * bl;
+
+    //*loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + del_trans;
     *angle = CONFIG_init_theta + del_rot;
     
     // ROS_INFO("GetPose loc = (%f, %f)", poses_.back().x, poses_.back().y);
@@ -168,6 +171,32 @@ void SLAM::GetObservedPointCloud(const std::vector<float>& ranges,
 
 }
 
+// create the rasterized cost table based on prev_scan points
+Eigen::Matrix2d SLAM::CreateCostTable(std::vector<Eigen::Vector2f> prev_scan) {
+  return Eigen::Matrix2d(100, 100);
+}
+
+// Observation Likelihood: return log likelihood of how likely it is 
+// that a given x, y, theta and curr_scan are correlated to cost_table
+float SLAM::FindObservationLogLikelihood(float x, 
+                                         float y, 
+                                         float theta, 
+                                         Eigen::Matrix2d cost_table, 
+                                         std::vector<Eigen::Vector2f> curr_scan) {
+  return 0.0;
+}
+
+// Motion Model: return log likelihood of how likely it is
+// that a given x, y, theta exits given curr_pose
+float SLAM::FindMotionModelLogLikelihood(float x, 
+                                         float y, 
+                                         float theta, 
+                                         Pose curr_pose) {
+  return 0.0;
+}
+
+
+
 void SLAM::ObserveLaser(const vector<float>& ranges,
                         float range_min,
                         float range_max,
@@ -188,23 +217,61 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
     poses_.back().scan = observed_scan;
   // Compute Correlative Scan Matching with previous two poses
   } else {
-    poses_.back().scan = observed_scan;
+    
+    if (poses_.back().scan.size() == 0) {
 
-    // look at the last pose.scan in poses_ and if empty:
-    //    given: prev_pose.x,y,theta,scan,
-    //           curr_pose.x,y,theta
-    //           scan(ranges,min,max,etc)
-    //    create cost_table = prev_pose.scan + normal_distribution_for_each_point
-    //    create corr_scan_probabilities (x,y,theta) centered at curr_pose.x,y,theta
-    //        where each (x,y,theta) is probability of scan matching with prev_pose.scan
-    //            for each (x,y,theta):
-    //                use cost_table to determine observation_likelihood probability
-    //                      multiplied by motion_model_probability
+      poses_.back().scan = observed_scan;
+      Pose curr_pose = poses_.back();
+      auto prev_pose_iter = poses_.end();
+      prev_pose_iter--;
+      Pose prev_pose = *prev_pose_iter;
+      Eigen::Matrix2d cost_table = CreateCostTable(prev_pose.scan);
+      
 
-    // return highest probability in corr_scan_probabilities as optimized pose:
-    //     curr_pose.x,y,theta = optimized pose
-    // cur_pose.scan = observed_scan
-          
+      float x_width = 0.5;
+      float y_width = 0.5;
+      float theta_width = 30 * M_PI / 180.0;
+      float resolution = 50.0;
+      float delta_pos_x = 2 * x_width / resolution;
+      float delta_pos_y = 2 * y_width / resolution;
+      float delta_theta = 2 * theta_width / resolution;
+
+      float max_loglikelihood = -10000000.0;
+      float best_x = curr_pose.x;
+      float best_y = curr_pose.y;
+      float best_theta = curr_pose.theta;
+
+      for (float x_i = -x_width + curr_pose.x; x_i <= x_width + curr_pose.x; x_i += delta_pos_x) {
+        for (float y_i = -y_width + curr_pose.y; y_i <= y_width + curr_pose.y; y_i +=delta_pos_y) {
+          for (float theta_i = -delta_theta + curr_pose.theta; theta_i <= delta_theta + curr_pose.theta; theta_i += delta_theta) {
+            float log_ol = FindObservationLogLikelihood(x_i, y_i, theta_i, cost_table, curr_pose.scan);
+            float log_mm = FindMotionModelLogLikelihood(x_i, y_i, theta_i, curr_pose);
+            float log_likelihood = log_ol + log_mm;
+            if (log_likelihood > max_loglikelihood){ //needs to be correct for log scale
+              max_loglikelihood = log_likelihood;
+              best_x = x_i;
+              best_y = y_i;
+              best_theta = theta_i;
+            }
+          }
+        }
+      }
+
+      curr_pose.x = best_x;
+      curr_pose.y = best_y;
+      curr_pose.theta = best_theta;
+      
+
+      //    create corr_scan_probabilities (x,y,theta) centered at curr_pose.x,y,theta
+      //        where each (x,y,theta) is probability of scan matching with prev_pose.scan
+      //            for each (x,y,theta):
+      //                use cost_table to determine observation_likelihood probability
+      //                      multiplied by motion_model_probability
+
+      // return highest probability in corr_scan_probabilities as optimized pose:
+      //     curr_pose.x,y,theta = optimized pose
+      // cur_pose.scan = observed_scan
+    }    
 
 
 
@@ -232,6 +299,8 @@ void SLAM::ObserveOdometry(const Vector2f& odom_loc, const float odom_angle) {
 
   float min_trans = 0.5;
   float min_rot = 30 * M_PI / 180.0;
+
+  ROS_INFO("poses_.size() = %ld", poses_.size());
 
   // if new pose has moved or rotated more than threshold
   if (((prev_update_loc_ - odom_loc).norm() >= min_trans) || 
