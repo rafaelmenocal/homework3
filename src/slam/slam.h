@@ -35,6 +35,10 @@ class SLAM {
   // Default Constructor.
   SLAM();
 
+  // Called to update variables based on odometry
+  void UpdateOdometry(const Eigen::Vector2f& odom_loc,
+                      const float odom_angle);
+                      
   // Observe a new laser scan.
   void ObserveLaser(const std::vector<float>& ranges,
                     float range_min,
@@ -58,6 +62,40 @@ class SLAM {
   Eigen::Vector2f prev_odom_loc_;
   float prev_odom_angle_;
   bool odom_initialized_;
+
+  Eigen::Vector2f curr_odom_loc_;
+  float curr_odom_angle_;
+  double curr_time_;
+  double prev_time_;
+  double del_time_;
+  
+  Eigen::Vector2f del_odom_loc_;
+  
+  Eigen::Vector2f prev_odom_vel2f_;
+  Eigen::Vector2f odom_vel2f_;
+  Eigen::Vector2f odom_accel2f_;
+  float odom_vel_;
+  float odom_accel_;
+  float del_odom_angle_;
+  float odom_omega_;
+
+  // A few small helper functions.
+  inline float_t Vel2fToVel() const {
+    return sqrt(pow(odom_vel2f_.x(), 2) + pow(odom_vel2f_.y(), 2));
+  };
+
+  inline float_t Accel2fToAccel() const {
+    return sqrt(pow(odom_accel2f_.x(), 2) + pow(odom_accel2f_.y(), 2));
+  }
+
+  inline Eigen::Vector2f GetOdomVel2f() const {
+    return (1.0 / del_time_) * 
+      Eigen::Vector2f(curr_odom_loc_.x() - prev_odom_loc_.x(), curr_odom_loc_.y() - prev_odom_loc_.y());
+  }
+
+  inline Eigen::Vector2f GetOdomAccel2f() const {
+    return (prev_odom_vel2f_ - odom_vel2f_) * del_time_;
+  }
 };
 }  // namespace slam
 
