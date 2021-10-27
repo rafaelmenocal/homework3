@@ -70,19 +70,22 @@ class SLAM {
                              float angle_max,
                              std::vector<Eigen::Vector2f>* obs_scan_ptr);
 
-  Eigen::Matrix2d CreateCostTable(std::vector<Eigen::Vector2f> prev_scan);
+  Eigen::MatrixXd CreateCostTable(std::vector<Eigen::Vector2f> prev_scan);
 
-  float FindObservationLogLikelihood(float x, 
+  double FindObservationLogLikelihood(float x, 
                                      float y, 
                                      float theta, 
-                                     Eigen::Matrix2d cost_table, 
+                                     Pose prev_pose,
+                                     Eigen::MatrixXd cost_table, 
                                      std::vector<Eigen::Vector2f> curr_scan);
  
 
-  float FindMotionModelLogLikelihood(float x, 
+  double FindMotionModelLogLikelihood(float x, 
                                      float y, 
                                      float theta, 
-                                     Pose curr_pose);
+                                     Pose curr_pose,
+                                     Pose prev_pose);
+  void PrintPoses();
   
 
  private:
