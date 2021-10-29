@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <vector>
+#include <memory>
 
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
@@ -43,8 +44,7 @@ class SLAM {
   SLAM();
 
   // Called to update variables based on odometry
-  void UpdateOdometry(const Eigen::Vector2f& odom_loc,
-                      const float odom_angle);
+  void UpdateOdometry(const Eigen::Vector2f& odom_loc, const float odom_angle);
 
   // Observe a new laser scan.
   void ObserveLaser(const std::vector<float>& ranges,
@@ -54,8 +54,7 @@ class SLAM {
                     float angle_max);
 
   // Observe new odometry-reported location.
-  void ObserveOdometry(const Eigen::Vector2f& odom_loc,
-                       const float odom_angle);
+  void ObserveOdometry(const Eigen::Vector2f& odom_loc, const float odom_angle);
 
   // Get latest map.
   std::vector<Eigen::Vector2f> GetMap();
@@ -70,21 +69,22 @@ class SLAM {
                              float angle_max,
                              std::vector<Eigen::Vector2f>* obs_scan_ptr);
 
-  Eigen::MatrixXd CreateCostTable(std::vector<Eigen::Vector2f> prev_scan);
+  void CreateCostTable(const std::vector<Eigen::Vector2f>& prev_scan,
+                       std::shared_ptr<Eigen::MatrixXd>& cost_table_ptr);
 
-  double FindObservationLogLikelihood(float x, 
-                                     float y, 
-                                     float theta, 
-                                     Pose prev_pose,
-                                     Eigen::MatrixXd cost_table, 
-                                     std::vector<Eigen::Vector2f> curr_scan);
+  float_t FindObservationLogLikelihood(float x, 
+                                       float y, 
+                                       float theta, 
+                                       const Pose& prev_pose,
+                                       const Eigen::MatrixXd& cost_table, 
+                                       const std::vector<Eigen::Vector2f>& curr_scan);
  
 
-  double FindMotionModelLogLikelihood(float x, 
-                                     float y, 
-                                     float theta, 
-                                     Pose curr_pose,
-                                     Pose prev_pose);
+  float_t FindMotionModelLogLikelihood(float x, 
+                                       float y, 
+                                       float theta, 
+                                       const Pose& curr_pose,
+                                       const Pose& prev_pose);
   void PrintPoses();
   
 
