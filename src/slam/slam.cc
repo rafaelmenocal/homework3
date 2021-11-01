@@ -81,17 +81,8 @@ SLAM::SLAM() :
 void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
   // Return the latest pose estimate of the robot.
   if (poses_.size() != 0) {
-    Eigen::Vector2f del_trans = Eigen::Vector2f(poses_.back().x - poses_.front().x, poses_.back().y - poses_.front().y);
-    float_t del_rot = poses_.back().theta - poses_.front().theta;
-
-    auto bl = Eigen::Rotation2Df(-poses_.front().theta) * del_trans;
-    *loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + Eigen::Rotation2Df(CONFIG_init_theta) * bl;
-
-    //*loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + del_trans;
-    *angle = CONFIG_init_theta + del_rot;
-    
-    // ROS_INFO("GetPose loc = (%f, %f)", poses_.back().x, poses_.back().y);
-    // ROS_INFO("GetPose angle = %f", poses_.back().theta);
+    *loc = Eigen::Vector2f(poses_.back().x, poses_.back().y);
+    *angle = poses_.back().theta;
   }
 }
 
@@ -501,24 +492,27 @@ vector<Eigen::Vector2f> SLAM::GetMap() {
     // ROS_INFO("initial_pose = (%f, %f)", initial_pose.x, initial_pose.y);
     // ROS_INFO("curr_pose = (%f, %f)", curr_pose.x, curr_pose.y);
 
-    Eigen::Rotation2Df rot_to_initial_pose(curr_pose.theta - initial_pose.theta);
+    Eigen::Rotation2Df rot_to_initial_pose(-(curr_pose.theta - initial_pose.theta));
     Eigen::Vector2f trans_to_initial_pose(curr_pose.x - initial_pose.x, curr_pose.y - initial_pose.y);
+
+    Eigen::Vector2f trans_to_curr_pose(curr_pose.x, curr_pose.y);
+    Eigen::Rotation2Df rot_to_curr_pose(curr_pose.theta);
     
     // ROS_INFO("curr_pose.theta - initial_pose.theta = %f", curr_pose.theta - initial_pose.theta);
     // ROS_INFO("trans_to_initial_pose = (%f, %f)", trans_to_initial_pose.x(), trans_to_initial_pose.y());
 
-    Eigen::Rotation2Df rot_to_init_frame(initial_pose.theta - CONFIG_init_theta);
-    Eigen::Vector2f trans_to_init_frame(initial_pose.x - CONFIG_init_x, initial_pose.y - CONFIG_init_y);
+    Eigen::Rotation2Df rot_to_init_frame(initial_pose.theta);
+    Eigen::Vector2f trans_to_init_frame(initial_pose.x, initial_pose.y);
 
     // ROS_INFO("initial_pose.theta - CONFIG_init_theta = %f", initial_pose.theta - CONFIG_init_theta);
     // ROS_INFO("trans_to_init = (%f, %f)", trans_to_init_frame.x(), trans_to_init_frame.y());
 
     std::vector<Eigen::Vector2f> trans_scan;
-    for (auto& point : curr_pose.scan){ 
-      //ROS_INFO("point = (%f, %f)", point.x(), point.y());
-      Eigen::Vector2f point_in_initial_pose(rot_to_initial_pose * (point + trans_to_initial_pose));
-      //ROS_INFO("point_in_initial_pose = (%f, %f)", point_in_initial_pose.x(), point_in_initial_pose.y());
-      Eigen::Vector2f point_in_init_frame(rot_to_init_frame * (point_in_initial_pose + trans_to_init_frame));
+    for (auto& point : curr_pose.scan) { 
+      // Get the scan point in the frame of the current pose
+      Eigen::Vector2f point_in_current_pose(rot_to_curr_pose * (point + trans_to_curr_pose));
+
+      Eigen::Vector2f point_in_init_frame(rot_to_initial_pose * (point_in_current_pose - trans_to_init_frame));
       //ROS_INFO("point_in_initial_pose = (%f, %f)", point_in_initial_pose.x(), point_in_initial_pose.y());
       trans_scan.push_back(point_in_init_frame);
     }
