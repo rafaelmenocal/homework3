@@ -78,11 +78,30 @@ SLAM::SLAM() :
     prev_update_loc_(0,0),
     prev_update_angle_(0) {}
 
+// void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
+//   // Return the latest pose estimate of the robot.
+//   if (poses_.size() != 0) {
+//     Eigen::Vector2f del_trans = Eigen::Vector2f(poses_.back().x - poses_.front().x, poses_.back().y - poses_.front().y);
+//     float_t del_rot = poses_.back().theta - poses_.front().theta;
+
+//     auto bl = Eigen::Rotation2Df(-poses_.front().theta) * del_trans;
+//     *loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + Eigen::Rotation2Df(CONFIG_init_theta) * bl;
+
+//     //*loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + del_trans;
+//     *angle = CONFIG_init_theta + del_rot;
+    
+//     // ROS_INFO("GetPose loc = (%f, %f)", poses_.back().x, poses_.back().y);
+//     // ROS_INFO("GetPose angle = %f", poses_.back().theta);
+//   }
+// }
+
 void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
   // Return the latest pose estimate of the robot.
   if (poses_.size() != 0) {
-    *loc = Eigen::Vector2f(poses_.back().x, poses_.back().y);
-    *angle = poses_.back().theta;
+    Eigen::Vector2f del_trans = Eigen::Vector2f(poses_.back().x, poses_.back().y);
+    float_t del_rot = poses_.back().theta;
+    *loc = del_trans;
+    *angle = del_rot;
   }
 }
 
@@ -416,8 +435,8 @@ void SLAM::ObserveOdometry(const Eigen::Vector2f& odom_loc, const float odom_ang
   // Keep track of odometry to estimate how far the robot has moved between 
   // poses.
 
-  float min_trans = 0.15;
-  float min_rot = 30 * M_PI / 180.0;
+  float min_trans = 0.1;
+  float min_rot = 1 * M_PI / 180.0;
 
   // ROS_INFO("poses_.size() = %ld", poses_.size());
 
@@ -451,75 +470,102 @@ void SLAM::ObserveOdometry(const Eigen::Vector2f& odom_loc, const float odom_ang
 
 }
 
+vector<Vector2f> SLAM::GetMap() {
+  std::vector<Vector2f> map;
+  // Reconstruct the map as a single aligned point cloud from all saved poses
+  // and their respective scans.
+
+  Pose& initial_pose = poses_.front();
+
+  PrintPoses();
+  for (auto& curr_pose : poses_) {
+    Eigen::Rotation2Df base_rot (initial_pose.theta - curr_pose.theta);
+    Eigen::Vector2f del_trans(curr_pose.x - initial_pose.x,
+                              curr_pose.y - initial_pose.y);
+
+    ROS_INFO("initial_pose = (%f, %f, %f)", initial_pose.x, initial_pose.y, initial_pose.theta);
+    ROS_INFO("curr_pose = (%f, %f, %f)", curr_pose.x, curr_pose.y, curr_pose.theta);
+    
+    ROS_INFO("initial_pose.theta - curr_pose.theta = %f", initial_pose.theta - curr_pose.theta);
+    ROS_INFO("del_trans = (%f, %f)", del_trans.x(), del_trans.y());
+
+    std::vector<Eigen::Vector2f> trans_scan;
+    for (auto& point : curr_pose.scan){ 
+      Eigen::Vector2f point_after_rot(base_rot * point);
+      Eigen::Vector2f point_after_trans = point_after_rot + del_trans;
+      Eigen::Vector2f point_after_final_trans = point_after_trans + Vector2f(initial_pose.x, initial_pose.y);
+      ROS_INFO("point = (%f, %f)", point.x(), point.y());
+      ROS_INFO("point_after_rot = (%f, %f)", point_after_rot.x(), point_after_rot.y());
+      ROS_INFO("point_after_trans = (%f, %f)", point_after_trans.x(), point_after_trans.y());
+      ROS_INFO("point_after_final_trans = (%f, %f)", point_after_final_trans.x(), point_after_final_trans.y());
+      trans_scan.push_back(point_after_final_trans);
+      // break;
+    }
+    map.insert(map.end(), trans_scan.begin(), trans_scan.end());
+    // break;
+  }
+  return map;
+}
+
 // vector<Vector2f> SLAM::GetMap() {
 //   std::vector<Vector2f> map;
 //   // Reconstruct the map as a single aligned point cloud from all saved poses
 //   // and their respective scans.
 
 //   Pose initial_pose = poses_.front();
-//   // map = initial_pose.scan;
 
-//   // PrintPose(initial_pose, "Initial Pose");
 //   for (auto& curr_pose : poses_) {
-    
-//     // need to translate the pose.scan relative to poses_.front().scan
-//     // PrintPose(curr_pose, "Current Pose");
-//     Eigen::Rotation2Df base_rot (-initial_pose.theta);
-//     Eigen::Vector2f del_trans = Eigen::Vector2f(curr_pose.x - initial_pose.x - CONFIG_init_x,
-//                                                 curr_pose.y - initial_pose.y - CONFIG_init_y);
-//     Eigen::Rotation2Df del_rot(-(curr_pose.theta - initial_pose.theta - CONFIG_init_theta));
-    
+//     ROS_INFO("init_x = %f, init_y = %f, init_theta = %f", CONFIG_init_x, CONFIG_init_y, CONFIG_init_theta);
+//     ROS_INFO("initial_pose = (%f, %f, %f)", initial_pose.x, initial_pose.y, initial_pose.theta);
+//     ROS_INFO("curr_pose = (%f, %f, %f)", curr_pose.x, curr_pose.y, curr_pose.theta);
+
+//     Eigen::Rotation2Df rot1st_to_initial_pose(-curr_pose.theta);
+//     Eigen::Vector2f trans_to_initial_pose(initial_pose.x - curr_pose.x, initial_pose.y - curr_pose.y);
+//     Eigen::Rotation2Df rot2nd_to_initial_pose(initial_pose.theta);
+
+//     ROS_INFO("-curr_pose.theta = %f", -curr_pose.theta);
+//     ROS_INFO("trans_to_initial_pose = (%f, %f)", trans_to_initial_pose.x(), trans_to_initial_pose.y());
+//     ROS_INFO("initial_pose.theta = %f", initial_pose.theta);
+
+//     Eigen::Rotation2Df rot1st_to_init_frame(-initial_pose.theta);
+//     Eigen::Vector2f trans_to_init_frame(CONFIG_init_x, CONFIG_init_y);
+//     // Eigen::Vector2f trans_to_init_frame(CONFIG_init_x - initial_pose.x, CONFIG_init_y - initial_pose.y);
+//     Eigen::Rotation2Df rot2nd_to_init_frame(CONFIG_init_theta);
+
+//     ROS_INFO("initial_pose.theta = %f", initial_pose.theta);
+//     ROS_INFO("trans_to_init = (%f, %f)", trans_to_init_frame.x(), trans_to_init_frame.y());
+//     ROS_INFO("CONFIG_init_theta = %f", CONFIG_init_theta);
+
 //     std::vector<Eigen::Vector2f> trans_scan;
 //     for (auto& point : curr_pose.scan){ 
-//       // ROS_INFO("point(%f, %f), del_trans (%f, %f)", point.x(), point.y(), del_trans.x(), del_trans.y());
-//       trans_scan.push_back(del_rot * (point + base_rot * del_trans)); //del_rot * (point - del_trans));
+//       ROS_INFO("point = (%f, %f)", point.x(), point.y());
+//       Eigen::Vector2f point_in_initial_pose_after_1strot(rot1st_to_initial_pose * point);
+//       Eigen::Vector2f point_in_initial_pose_after_trans(point_in_initial_pose_after_1strot - trans_to_initial_pose);
+//       Eigen::Vector2f point_in_initial_pose_after_2ndrot(rot2nd_to_initial_pose * point_in_initial_pose_after_trans);
+      
+//       ROS_INFO("point_in_initial_pose_after_1strot = (%f, %f)", point_in_initial_pose_after_1strot.x(), point_in_initial_pose_after_1strot.y());
+//       ROS_INFO("point_in_initial_pose_after_trans = (%f, %f)", point_in_initial_pose_after_trans.x(), point_in_initial_pose_after_trans.y());
+//       ROS_INFO("point_in_initial_pose_after_2ndrot = (%f, %f)", point_in_initial_pose_after_2ndrot.x(), point_in_initial_pose_after_2ndrot.y());
+      
+      
+//       Eigen::Vector2f point_in_init_frame_after_trans(point_in_initial_pose_after_2ndrot - trans_to_init_frame);
+//       // Eigen::Vector2f point_in_init_frame_after_1strot(rot1st_to_init_frame * point_in_initial_pose_after_2ndrot);
+//       Eigen::Vector2f point_in_init_frame_after_2ndrot(rot2nd_to_init_frame * point_in_init_frame_after_trans);
+//       Eigen::Vector2f point_in_init_frame_after_trans2(point_in_init_frame_after_2ndrot + trans_to_init_frame);
+
+//       // ROS_INFO("point_in_init_frame_after_1strot = (%f, %f)", point_in_init_frame_after_1strot.x(), point_in_init_frame_after_1strot.y());
+//       ROS_INFO("point_in_init_frame_after_trans = (%f, %f)", point_in_init_frame_after_trans.x(), point_in_init_frame_after_trans.y());
+//       ROS_INFO("point_in_init_frame_after_2ndrot = (%f, %f)", point_in_init_frame_after_2ndrot.x(), point_in_init_frame_after_2ndrot.y());
+//       ROS_INFO("point_in_init_frame_after_trans2 = (%f, %f)", point_in_init_frame_after_trans2.x(), point_in_init_frame_after_trans2.y());
+
+//       trans_scan.push_back(point_in_init_frame_after_trans2);
+//       break;
 //     }
 //     map.insert(map.end(), trans_scan.begin(), trans_scan.end());
+//     break;
 //   }
 //   PrintPoses();
 //   return map;
 // }
-
-vector<Eigen::Vector2f> SLAM::GetMap() {
-  std::vector<Eigen::Vector2f> map;
-  // Reconstruct the map as a single aligned point cloud from all saved poses
-  // and their respective scans.
-
-  Pose& initial_pose = poses_.front();
-
-  for (auto& curr_pose : poses_) {
-    // ROS_INFO("init_x = %f, init_y = %f, init_theta = %f", CONFIG_init_x, CONFIG_init_y, CONFIG_init_theta);
-    // ROS_INFO("initial_pose = (%f, %f)", initial_pose.x, initial_pose.y);
-    // ROS_INFO("curr_pose = (%f, %f)", curr_pose.x, curr_pose.y);
-
-    Eigen::Rotation2Df rot_to_initial_pose(-(curr_pose.theta - initial_pose.theta));
-    Eigen::Vector2f trans_to_initial_pose(curr_pose.x - initial_pose.x, curr_pose.y - initial_pose.y);
-
-    Eigen::Vector2f trans_to_curr_pose(curr_pose.x, curr_pose.y);
-    Eigen::Rotation2Df rot_to_curr_pose(curr_pose.theta);
-    
-    // ROS_INFO("curr_pose.theta - initial_pose.theta = %f", curr_pose.theta - initial_pose.theta);
-    // ROS_INFO("trans_to_initial_pose = (%f, %f)", trans_to_initial_pose.x(), trans_to_initial_pose.y());
-
-    Eigen::Rotation2Df rot_to_init_frame(initial_pose.theta);
-    Eigen::Vector2f trans_to_init_frame(initial_pose.x, initial_pose.y);
-
-    // ROS_INFO("initial_pose.theta - CONFIG_init_theta = %f", initial_pose.theta - CONFIG_init_theta);
-    // ROS_INFO("trans_to_init = (%f, %f)", trans_to_init_frame.x(), trans_to_init_frame.y());
-
-    std::vector<Eigen::Vector2f> trans_scan;
-    for (auto& point : curr_pose.scan) { 
-      // Get the scan point in the frame of the current pose
-      Eigen::Vector2f point_in_current_pose(rot_to_curr_pose * (point + trans_to_curr_pose));
-
-      Eigen::Vector2f point_in_init_frame(rot_to_initial_pose * (point_in_current_pose - trans_to_init_frame));
-      //ROS_INFO("point_in_initial_pose = (%f, %f)", point_in_initial_pose.x(), point_in_initial_pose.y());
-      trans_scan.push_back(point_in_init_frame);
-    }
-    map.insert(map.end(), trans_scan.begin(), trans_scan.end());
-  }
-  PrintPoses();
-  return map;
-}
 
 }  // namespace slam
