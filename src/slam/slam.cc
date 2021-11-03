@@ -236,42 +236,6 @@ float_t SLAM::FindObservationLogLikelihood(
   return observation_liklihood;
 }
 
-// Motion Model: return log likelihood of how likely it is that a given x, y, theta
-// exits given curr_pose.
-float_t SLAM::FindMotionModelLogLikelihood(float x1,
-                                           float x2, 
-                                           float y1,
-                                           float y2,
-                                           float theta1,
-                                           float theta2,
-                                           const Pose& curr_pose,
-                                           const Pose& prev_pose) {
-
-  float_t dx1 = x1 - prev_pose.x;
-  float_t dx2 = x2 - prev_pose.x;
-  float_t dy1 = y1 - prev_pose.y;
-  float_t dy2 = y2 - prev_pose.y;
-  float_t dtheta1 = theta1 - prev_pose.theta;
-  float_t dtheta2 = theta2 - prev_pose.theta;
-
-  float_t dx_odom = curr_pose.x - prev_pose.x;
-  float_t dy_odom = curr_pose.y - prev_pose.y;
-  float_t dtheta_odom = curr_pose.theta - prev_pose.theta;
-
-  float_t std = sqrt(pow(dx_odom, 2) + pow(dy_odom, 2));
-  std += 1.0 * abs(dtheta_odom);
-
-  float_t dx_prob = SampleNormalDensity(dx2, dx_odom, std);
-  dx_prob -= SampleNormalDensity(dx1, dx_odom, std);
-
-  float_t dy_prob = SampleNormalDensity(dy2, dx_odom, std);
-  dy_prob -= SampleNormalDensity(dy1, dx_odom, std);
-
-  float_t dtheta_prob = SampleNormalDensity(dtheta2, dx_odom, std);
-  dtheta_prob -= SampleNormalDensity(dtheta1, dx_odom, std);
-
-  return dx_prob * dy_prob * dtheta_prob;
-}
 float_t MotionModel(float val1,
                     float val2,
                     float mean,
@@ -334,7 +298,7 @@ void SLAM::ObserveLaser(const std::vector<float>& ranges,
       float_t dtheta_odom = curr_pose.theta - prev_pose.theta;
 
       float_t std = sqrt(pow(dx_odom, 2) + pow(dy_odom, 2));
-      std += 1.0 * abs(dtheta_odom);
+      std += 100.0 * abs(dtheta_odom);
 
 
       std::vector<float> x_probs, x_vals;
@@ -350,8 +314,8 @@ void SLAM::ObserveLaser(const std::vector<float>& ranges,
       std::vector<float> y_probs, y_vals;
       y_probs.reserve(static_cast<int>(resolution));
       float dy_mean = curr_pose.y - prev_pose.y;
-      for (float y_i = -y_width + curr_pose.y; y_i <= y_width + curr_pose.y; y_i += y_inc) {
-          y_probs.push_back(MotionModel(y_i, y_i + y_inc, dy_mean, std));
+      for (float y_i = y_width + curr_pose.y; y_i >= -y_width + curr_pose.y; y_i -= y_inc) {
+          y_probs.push_back(MotionModel(y_i - y_inc, y_i, dy_mean, std));
           y_vals.push_back(y_i);
       }
       Eigen::MatrixXf y_probs_mat(1, y_probs.size());
