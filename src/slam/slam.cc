@@ -18,7 +18,6 @@
 \author  Joydeep Biswas, (C) 2019
 */
 //========================================================================
-#include <fstream>
 
 #include "slam.h"
 
@@ -39,19 +38,10 @@
 #include "vector_map/vector_map.h"
 
 using namespace math_util;
-using Eigen::Affine2f;
-using Eigen::Rotation2Df;
-using Eigen::Translation2f;
-using Eigen::Vector2i;
-using std::cout;
-using std::endl;
-using std::string;
-using std::swap;
-using std::vector;
-using vector_map::VectorMap;
 
 namespace slam {
 
+constexpr const int NUM_PIXELS = 100;
 const int debug_odom = false;
 
 config_reader::ConfigReader config_reader_({"config/particle_filter.lua"});
@@ -79,30 +69,12 @@ SLAM::SLAM() :
     prev_update_loc_(0,0),
     prev_update_angle_(0) {}
 
-// void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
-//   // Return the latest pose estimate of the robot.
-//   if (poses_.size() != 0) {
-//     Eigen::Vector2f del_trans = Eigen::Vector2f(poses_.back().x - poses_.front().x, poses_.back().y - poses_.front().y);
-//     float_t del_rot = poses_.back().theta - poses_.front().theta;
-
-//     auto bl = Eigen::Rotation2Df(-poses_.front().theta) * del_trans;
-//     *loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + Eigen::Rotation2Df(CONFIG_init_theta) * bl;
-
-//     //*loc = Eigen::Vector2f(CONFIG_init_x, CONFIG_init_y) + del_trans;
-//     *angle = CONFIG_init_theta + del_rot;
-    
-//     // ROS_INFO("GetPose loc = (%f, %f)", poses_.back().x, poses_.back().y);
-//     // ROS_INFO("GetPose angle = %f", poses_.back().theta);
-//   }
-// }
-
 void SLAM::GetPose(Eigen::Vector2f* loc, float* angle) const {
   // Return the latest pose estimate of the robot.
   if (poses_.size() != 0) {
     Eigen::Vector2f del_trans = Eigen::Vector2f(poses_.back().x, poses_.back().y);
-    float_t del_rot = poses_.back().theta;
     *loc = del_trans;
-    *angle = del_rot;
+    *angle = poses_.back().theta;
   }
 }
 
@@ -166,8 +138,9 @@ void SLAM::GetObservedPointCloud(const std::vector<float>& ranges,
                                  float angle_max,
                                  std::vector<Eigen::Vector2f>* obs_scan_ptr) {
   
-  const int num_ranges = ranges.size();
+  const int num_ranges = static_cast<int>(ranges.size());
   std::vector<Eigen::Vector2f>& obs_scan = *obs_scan_ptr;
+  obs_scan.reserve(num_ranges);
 
   const float angle_inc = (angle_max - angle_min) / num_ranges;
   for (int i = 0; i < num_ranges; i++) {
@@ -181,19 +154,8 @@ void SLAM::GetObservedPointCloud(const std::vector<float>& ranges,
   }
 }
 
-void PrintCostTable(Eigen::MatrixXd cost_table){
-  int row_size = cost_table.rows();
-  int col_size = cost_table.cols();
-
-  for (int i = 0; i < row_size; i++){
-    for (int j = 0; j < col_size; j++){
-      ROS_INFO("Cost_Table(%d,%d) = %f", i, j, cost_table(i,j));
-    }
-  }
-}
-
 float_t SampleNormalDensity(float_t val, float_t mean, float_t std_dev) {
-  return exp(-0.5 * pow((val - mean) / std_dev, 2));
+  return 0.5 * (1 + erf((val - mean) / (sqrt(2) * std_dev)));
 }
 
 // create the rasterized cost table based on prev_scan points
@@ -206,15 +168,14 @@ void SLAM::CreateCostTable(const std::vector<Eigen::Vector2f>& prev_scan,
         .              .
     (-10, -10) ... (10, -10)     
   */
-  float resolution = 100.0 / 20.0;  // 100 px / (10 * 2)m
+  float resolution = NUM_PIXELS / 20.0;  // 100 px / (10 * 2)m
 
-  cost_table_ptr = std::make_shared<Eigen::MatrixXd>(100, 100);
+  cost_table_ptr = std::make_shared<Eigen::MatrixXd>(NUM_PIXELS, NUM_PIXELS);
   Eigen::MatrixXd& cost_table = *cost_table_ptr;
   cost_table.setZero();
   
   for (const auto& point : prev_scan) {
 
-    ROS_INFO("point = (%f, %f)", point.x(), point.y());    
     // ROS_INFO("adjusted point = (%f, %f)", x, y);
     if ((point.x() <= 10.0 && point.x() >= -10.0)
         && (point.y() <= 10.0 && point.y() >= -10.0)) {
@@ -224,23 +185,22 @@ void SLAM::CreateCostTable(const std::vector<Eigen::Vector2f>& prev_scan,
       // the probability of observing the point at that different pixel location.
       for (int row = 0; row < cost_table.rows(); row++) {
         // y coordinate of the point in m
-        float  y_loc = ((1 / resolution) * row) - 10.0;
+        float y_loc_next = -((1 / resolution) * row) + 10.0;
+        float y_loc = -((1 / resolution) * (row + 1)) + 10.0;
+        float prob_y = SampleNormalDensity(y_loc_next, point.y(), 0.3);
+        prob_y -= SampleNormalDensity(y_loc, point.y(), 0.3);
         for (int col = 0; col < cost_table.cols(); col++) {
           // x coordinate of the point in m
           float x_loc = ((1 / resolution) * col) - 10.0;
+          float x_loc_next = ((1 / resolution) * (col + 1)) - 10.0;
           // Sample from pdf for value of finding this point at this (x_loc, y_loc).
           // Use sensor STD of 0.15m.
-          cost_table(row, col) = (SampleNormalDensity(x_loc, point.x(), 0.15)
-            + SampleNormalDensity(y_loc, point.y(), 0.15));
+          float prob_x = SampleNormalDensity(x_loc_next, point.x(), 0.3);
+          prob_x -= SampleNormalDensity(x_loc, point.x(), 0.3);
+          cost_table(row, col) += std::max(float(0.0), prob_x) * std::max(prob_y, float(0.0));
         }
       }
     }
-  }
-  
-  std::ofstream file("test.txt");
-  if (file.is_open())
-  {
-    file << cost_table << '\n';
   }
 }
 
@@ -250,24 +210,26 @@ float_t SLAM::FindObservationLogLikelihood(
   float x, float y, float theta, const Pose& prev_pose,
   const Eigen::MatrixXd& cost_table, const std::vector<Eigen::Vector2f>& curr_scan) {
 
-  float dx = x - prev_pose.x;
-  float dy = y - prev_pose.y;
-  float dtheta = theta - prev_pose.theta;
   float observation_liklihood = 0.0;
-  float resolution = 100.0 / 20.0;  // 100 px / (10 * 2)m
+  float resolution = NUM_PIXELS / 20.0;  // 100 px / (10 * 2)m
 
   // Translation and rotation to move point in new scan back to frame of previous scan.
-  Eigen::Vector2f translation(dx, dy);
-  Eigen::Rotation2Df rot(-dtheta);
+  Eigen::Vector2f translation(x - prev_pose.x, y - prev_pose.y);
+  Eigen::Rotation2Df rot(-(theta - prev_pose.theta));
   for (const auto& point : curr_scan) {
     Eigen::Vector2f trans_point = rot * (point - translation);
     // Since (0, 0) is in the upper left hand corner of the rasterized cost table, we
     // need to ensure the Cartesian to pixel transform is proper. For x, we just shift
     // the point over by half the x width.
     int x_loc = static_cast<int>(resolution * (trans_point.x() + 10));
-    // point.y() \in [-10, 10]. -10 corresponds to the first row of the matrix with a
-    // value of 0.
-    int y_loc = static_cast<int>(resolution * (trans_point.y() + 10));
+    x_loc = std::min(0, x_loc);
+    x_loc = std::max(x_loc, NUM_PIXELS - 1);
+
+    // point.y() \in [-10, 10]. Flip over y axis
+    int y_loc = static_cast<int>(resolution * (-trans_point.y() + 10));
+    y_loc = std::min(0, y_loc);
+    y_loc = std::max(y_loc, NUM_PIXELS - 1);
+    
     observation_liklihood += cost_table(y_loc, x_loc);
   }
 
@@ -276,51 +238,52 @@ float_t SLAM::FindObservationLogLikelihood(
 
 // Motion Model: return log likelihood of how likely it is that a given x, y, theta
 // exits given curr_pose.
-float_t SLAM::FindMotionModelLogLikelihood(float x, 
-                                         float y, 
-                                         float theta, 
-                                         const Pose& curr_pose,
-                                         const Pose& prev_pose) {
+float_t SLAM::FindMotionModelLogLikelihood(float x1,
+                                           float x2, 
+                                           float y1,
+                                           float y2,
+                                           float theta1,
+                                           float theta2,
+                                           const Pose& curr_pose,
+                                           const Pose& prev_pose) {
 
-  float_t dx = x - prev_pose.x;   
-  float_t dy = y - prev_pose.y;    
-  float_t dtheta = theta - prev_pose.theta;
+  float_t dx1 = x1 - prev_pose.x;
+  float_t dx2 = x2 - prev_pose.x;
+  float_t dy1 = y1 - prev_pose.y;
+  float_t dy2 = y2 - prev_pose.y;
+  float_t dtheta1 = theta1 - prev_pose.theta;
+  float_t dtheta2 = theta2 - prev_pose.theta;
 
   float_t dx_odom = curr_pose.x - prev_pose.x;
   float_t dy_odom = curr_pose.y - prev_pose.y;
   float_t dtheta_odom = curr_pose.theta - prev_pose.theta;
 
   float_t std = sqrt(pow(dx_odom, 2) + pow(dy_odom, 2));
-  std += abs(dtheta_odom);
+  std += 1.0 * abs(dtheta_odom);
 
-  float_t dx_loglikelihood = -(pow((dx - dx_odom), 2) / 2 * pow(std, 2));
-  float_t dy_loglikelihood = -(pow((dy - dy_odom), 2) / 2 * pow(std, 2));
-  float_t dtheta_loglikelihood = -(pow((dtheta - dtheta_odom), 2) / 2 * pow(std, 2));
+  float_t dx_prob = SampleNormalDensity(dx2, dx_odom, std);
+  dx_prob -= SampleNormalDensity(dx1, dx_odom, std);
 
-  return dx_loglikelihood + dy_loglikelihood + dtheta_loglikelihood;
+  float_t dy_prob = SampleNormalDensity(dy2, dx_odom, std);
+  dy_prob -= SampleNormalDensity(dy1, dx_odom, std);
+
+  float_t dtheta_prob = SampleNormalDensity(dtheta2, dx_odom, std);
+  dtheta_prob -= SampleNormalDensity(dtheta1, dx_odom, std);
+
+  return dx_prob * dy_prob * dtheta_prob;
+}
+float_t MotionModel(float val1,
+                    float val2,
+                    float mean,
+                    float std) {
+
+  float_t dx1 = val1 - mean;
+  float_t dx2 = val2 - mean;
+
+  return SampleNormalDensity(dx2, mean, std) - SampleNormalDensity(dx1, mean, std);
 }
 
-void PrintScan(std::vector<Eigen::Vector2f> scan) {
-  int i = 0;
-  for (auto& point : scan){
-    ROS_INFO("Point %d: (%f, %f)", i, point.x(), point.y());
-    i++;
-  }
-}
-
-void PrintPose(Pose pose, string name){
-  ROS_INFO("pose(%s) = (x = %f, y = %f, theta = %f", name.c_str(), pose.x, pose.y, pose.theta);
-}
-
-void SLAM::PrintPoses(){
-  int i = 0;
-  for (auto& pose : poses_){
-    PrintPose(pose, std::to_string(i));
-    i++;
-  }
-}
-
-void SLAM::ObserveLaser(const vector<float>& ranges,
+void SLAM::ObserveLaser(const std::vector<float>& ranges,
                         float range_min,
                         float range_max,
                         float angle_min,
@@ -332,9 +295,6 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
   std::vector<Eigen::Vector2f> observed_scan;
   GetObservedPointCloud(
     ranges, range_min, range_max, angle_min, angle_max, &observed_scan);
-  
-  // ROS_INFO("Printing Observed Scan");
-  // PrintScan(observed_scan);
 
   // ObserveLaser called before there is a single pose in poses_
   if (poses_.size() == 0) {
@@ -344,10 +304,10 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
     poses_.back().scan = observed_scan;
   // Compute Correlative Scan Matching with previous two poses
   } else {
-    // poses_.back().scan = observed_scan; // remove this when uncommenting
 
     if (poses_.back().scan.size() == 0) {
-
+      
+      auto t1 = ros::Time::now().toSec();
       poses_.back().scan = observed_scan;
       Pose curr_pose = poses_.back();
       auto prev_pose_iter = poses_.end();
@@ -356,83 +316,95 @@ void SLAM::ObserveLaser(const vector<float>& ranges,
 
       std::shared_ptr<Eigen::MatrixXd> cost_table_ptr;
       CreateCostTable(prev_pose.scan, cost_table_ptr);
-      // ROS_INFO("FIRST TRY COST(0, 0): %f", (*cost_table_ptr)(0, 0));
-      
-      // ROS_INFO("Printing Cost_Table");
-      // PrintCostTable(cost_table);
 
-      float x_width = 0.25;
-      float y_width = 0.25;
-      float theta_width = 15 * M_PI / 180.0;
-      float resolution = 25.0;
-      float x_inc = 2 * x_width / resolution; // 2 * .5 / 50 = 0.02 increment
+      float x_width = 0.75;
+      float y_width = 0.75;
+      float theta_width = 30 * M_PI / 180.0;
+      float resolution = 50.0;
+      float x_inc = 2 * x_width / resolution;
       float y_inc = 2 * y_width / resolution;
       float theta_inc = 2 * theta_width / resolution; 
 
-      float_t max_loglikelihood = -10000000.0;
-      // float_t max_log_mm = -1000000.0;
-      // float_t max_log_ol = -1000000.0;
+      float_t max_loglikelihood = 0.0;
       float best_x = curr_pose.x;
       float best_y = curr_pose.y;
       float best_theta = curr_pose.theta;
 
-      // int num_elements = 0;
-      // int num_x = 0;
-      // int num_y = 0;
-      // int num_theta = 0;
-      // ROS_INFO("Printing x_i, y_i, theta_i");
-      //ROS_INFO("curr_pos is (%f, %f, %f)", best_x, best_y, best_theta);
-      // ROS_INFO("range is (%f - %f, %f - %f, %f - %f)", -x_width + curr_pose.x, x_width + curr_pose.x, -y_width + curr_pose.y, y_width + curr_pose.y, -theta_width + curr_pose.theta, theta_width + curr_pose.theta);
-      // ROS_INFO("iterations is (%f, %f, %f)", x_width * 2 / x_inc + 1, y_width * 2 / y_inc + 1, theta_width * 2 / theta_inc + 1);
+      float_t dx_odom = curr_pose.x - prev_pose.x;
+      float_t dy_odom = curr_pose.y - prev_pose.y;
+      float_t dtheta_odom = curr_pose.theta - prev_pose.theta;
 
-      // PrintPose(curr_pose, "Current Pose");
-      // PrintPose(prev_pose, "Previous Pose");
-      // PrintPoses();
-      
-      // double log_ol = FindObservationLogLikelihood(prev_pose.x, prev_pose.y, prev_pose.theta, prev_pose, cost_table, prev_pose.scan);
-      // ROS_INFO("log_ol = %f", log_ol);
-      // ROS_INFO("sum cost_table = %f", cost_table.sum());
-      
+      float_t std = sqrt(pow(dx_odom, 2) + pow(dy_odom, 2));
+      std += 1.0 * abs(dtheta_odom);
+
+
+      std::vector<float> x_probs, x_vals;
+      x_probs.reserve(static_cast<int>(resolution));
+      float dx_mean = curr_pose.x - prev_pose.x;
       for (float x_i = -x_width + curr_pose.x; x_i <= x_width + curr_pose.x; x_i += x_inc) {
-        for (float y_i = -y_width + curr_pose.y; y_i <= y_width + curr_pose.y; y_i += y_inc) {
-          for (float theta_i = -theta_width + curr_pose.theta; theta_i <= theta_width + curr_pose.theta; theta_i += theta_inc) {
-            
-            float_t log_ol = FindObservationLogLikelihood(x_i, y_i, theta_i, prev_pose, *cost_table_ptr, curr_pose.scan);
-            float_t log_mm = FindMotionModelLogLikelihood(x_i, y_i, theta_i, curr_pose, prev_pose);
-            float_t log_likelihood = log_ol + log_mm;
-            
-            if (log_likelihood > max_loglikelihood){ 
-              // max_log_mm = log_mm;
-              // max_log_ol = log_ol;
-              max_loglikelihood = log_likelihood;
-              
-              best_x = x_i;
-              best_y = y_i;
-              best_theta = theta_i;
-            }
-          }
-        }
+          x_probs.push_back(MotionModel(x_i, x_i + x_inc, dx_mean, std));
+          x_vals.push_back(x_i);
+      }
+      Eigen::MatrixXf x_probs_mat(1, x_probs.size());
+      x_probs_mat.rowwise() = Eigen::Map<Eigen::RowVectorXf>(x_probs.data(), x_probs.size());
+
+      std::vector<float> y_probs, y_vals;
+      y_probs.reserve(static_cast<int>(resolution));
+      float dy_mean = curr_pose.y - prev_pose.y;
+      for (float y_i = -y_width + curr_pose.y; y_i <= y_width + curr_pose.y; y_i += y_inc) {
+          y_probs.push_back(MotionModel(y_i, y_i + y_inc, dy_mean, std));
+          y_vals.push_back(y_i);
+      }
+      Eigen::MatrixXf y_probs_mat(1, y_probs.size());
+      y_probs_mat.rowwise() = Eigen::Map<Eigen::RowVectorXf>(y_probs.data(), y_probs.size());
+
+      std::vector<float> theta_probs, theta_vals;
+      theta_probs.reserve(static_cast<int>(resolution));
+      float dtheta_mean = curr_pose.theta - prev_pose.theta;
+      for (float theta_i = -theta_width + curr_pose.theta; theta_i <= theta_width + curr_pose.theta; theta_i += theta_inc) {
+          theta_probs.push_back(MotionModel(theta_i, theta_i + theta_inc, dtheta_mean, std));
+          theta_vals.push_back(theta_i);
       }
 
-      // ROS_INFO("log_mm(%f, %f, %f) = %.10f", best_x, best_y, best_theta, max_log_mm);
-      // ROS_INFO("log_ol(%f, %f, %f) = %.10f", best_x, best_y, best_theta, max_log_ol);
-      // ROS_INFO("best_log_likelihood(%f, %f, %f) = %.10f", best_x, best_y, best_theta, max_loglikelihood);
-      // ROS_INFO("Num Elements = %d", num_elements);
-      // ROS_INFO("num_x = %d", num_x);
-      // ROS_INFO("num_y = %d", num_y / num_x);
-      // ROS_INFO("num_theta = %d", num_theta / num_y);
-      
-      // ROS_INFO("best_x = %f", best_x);
-      // ROS_INFO("best_y = %f", best_y);
-      // ROS_INFO("best_theta = %f", best_theta);
+      Eigen::MatrixXf xy_probs = y_probs_mat.transpose() * x_probs_mat;
+  
+      for (int x = 0; x < xy_probs.cols(); x++) {
+        for (int y = 0; y < xy_probs.rows(); y++) {
+          float xy_prob = xy_probs(y, x);
+          for (int theta = 0; theta < static_cast<int>(theta_probs.size()); theta++) {
+            float_t log_likelihood = xy_prob * theta_probs[theta];
+            if (log_likelihood > max_loglikelihood) {
+              max_loglikelihood = log_likelihood;
+              best_x = x_vals[x];
+              best_y = y_vals[x];
+              best_theta = theta_vals[theta];
+            }
+          }
+
+        }
+      }
+      auto t2 = ros::Time::now().toSec();
+      ROS_INFO("%f", t2 - t1);
+      // for (float x_i = -x_width + curr_pose.x; x_i <= x_width + curr_pose.x; x_i += x_inc) {
+      //   for (float y_i = -y_width + curr_pose.y; y_i <= y_width + curr_pose.y; y_i += y_inc) {
+      //     for (float theta_i = -theta_width + curr_pose.theta; theta_i <= theta_width + curr_pose.theta; theta_i += theta_inc) {
+            
+      //       float_t log_ol = FindObservationLogLikelihood(x_i, y_i, theta_i, prev_pose, *cost_table_ptr, curr_pose.scan);
+      //       float_t log_mm = FindMotionModelLogLikelihood(
+      //         x_i, x_i + x_inc, y_i, y_i + y_inc, theta_i, theta_i + theta_inc,
+      //         curr_pose, prev_pose);
+
+      //       float_t log_likelihood = log_ol * log_mm;
+            
+      //       i
+      //     }
+      //   }
+      // }
       curr_pose.x = best_x;
       curr_pose.y = best_y;
       curr_pose.theta = best_theta;
-      
     }    
-
   }  
-  
 }
 
 void SLAM::ObserveOdometry(const Eigen::Vector2f& odom_loc, const float odom_angle) {
@@ -444,8 +416,6 @@ void SLAM::ObserveOdometry(const Eigen::Vector2f& odom_loc, const float odom_ang
 
   float min_trans = 0.1;
   float min_rot = 1 * M_PI / 180.0;
-
-  // ROS_INFO("poses_.size() = %ld", poses_.size());
 
   // if new pose has moved or rotated more than threshold
   if (((prev_update_loc_ - odom_loc).norm() >= min_trans) || 
@@ -477,102 +447,23 @@ void SLAM::ObserveOdometry(const Eigen::Vector2f& odom_loc, const float odom_ang
 
 }
 
-vector<Eigen::Vector2f> SLAM::GetMap() {
+std::vector<Eigen::Vector2f> SLAM::GetMap() {
   std::vector<Eigen::Vector2f> map;
   // Reconstruct the map as a single aligned point cloud from all saved poses
   // and their respective scans.
-
-  Pose& initial_pose = poses_.front();
-
-  PrintPoses();
-  for (auto& curr_pose : poses_) {
-    Eigen::Rotation2Df base_rot (initial_pose.theta - curr_pose.theta);
-    Eigen::Vector2f del_trans(curr_pose.x - initial_pose.x,
-                              curr_pose.y - initial_pose.y);
-
-    ROS_INFO("initial_pose = (%f, %f, %f)", initial_pose.x, initial_pose.y, initial_pose.theta);
-    ROS_INFO("curr_pose = (%f, %f, %f)", curr_pose.x, curr_pose.y, curr_pose.theta);
-    
-    ROS_INFO("initial_pose.theta - curr_pose.theta = %f", initial_pose.theta - curr_pose.theta);
-    ROS_INFO("del_trans = (%f, %f)", del_trans.x(), del_trans.y());
-
+  for (const auto& curr_pose : poses_) {
+    Eigen::Rotation2Df curr_pose_rot(curr_pose.theta);
     std::vector<Eigen::Vector2f> trans_scan;
-    for (auto& point : curr_pose.scan){ 
-      Eigen::Vector2f point_after_rot(base_rot * point);
-      Eigen::Vector2f point_after_trans = point_after_rot + del_trans;
-      Eigen::Vector2f point_after_final_trans = point_after_trans + Eigen::Vector2f(initial_pose.x, initial_pose.y);
-      ROS_INFO("point = (%f, %f)", point.x(), point.y());
-      ROS_INFO("point_after_rot = (%f, %f)", point_after_rot.x(), point_after_rot.y());
-      ROS_INFO("point_after_trans = (%f, %f)", point_after_trans.x(), point_after_trans.y());
-      ROS_INFO("point_after_final_trans = (%f, %f)", point_after_final_trans.x(), point_after_final_trans.y());
-      trans_scan.push_back(point_after_final_trans);
-      // break;
+
+    for (const auto& point : curr_pose.scan) { 
+      // Rotate the point into the orientation of the pose then translate it by the
+      // x and y location of the pose
+      trans_scan.push_back(
+        curr_pose_rot * point + Eigen::Vector2f(curr_pose.x, curr_pose.y));
     }
+    map.reserve(trans_scan.size());
     map.insert(map.end(), trans_scan.begin(), trans_scan.end());
-    // break;
   }
   return map;
 }
-
-// vector<Vector2f> SLAM::GetMap() {
-//   std::vector<Vector2f> map;
-//   // Reconstruct the map as a single aligned point cloud from all saved poses
-//   // and their respective scans.
-
-//   Pose initial_pose = poses_.front();
-
-//   for (auto& curr_pose : poses_) {
-//     ROS_INFO("init_x = %f, init_y = %f, init_theta = %f", CONFIG_init_x, CONFIG_init_y, CONFIG_init_theta);
-//     ROS_INFO("initial_pose = (%f, %f, %f)", initial_pose.x, initial_pose.y, initial_pose.theta);
-//     ROS_INFO("curr_pose = (%f, %f, %f)", curr_pose.x, curr_pose.y, curr_pose.theta);
-
-//     Eigen::Rotation2Df rot1st_to_initial_pose(-curr_pose.theta);
-//     Eigen::Vector2f trans_to_initial_pose(initial_pose.x - curr_pose.x, initial_pose.y - curr_pose.y);
-//     Eigen::Rotation2Df rot2nd_to_initial_pose(initial_pose.theta);
-
-//     ROS_INFO("-curr_pose.theta = %f", -curr_pose.theta);
-//     ROS_INFO("trans_to_initial_pose = (%f, %f)", trans_to_initial_pose.x(), trans_to_initial_pose.y());
-//     ROS_INFO("initial_pose.theta = %f", initial_pose.theta);
-
-//     Eigen::Rotation2Df rot1st_to_init_frame(-initial_pose.theta);
-//     Eigen::Vector2f trans_to_init_frame(CONFIG_init_x, CONFIG_init_y);
-//     // Eigen::Vector2f trans_to_init_frame(CONFIG_init_x - initial_pose.x, CONFIG_init_y - initial_pose.y);
-//     Eigen::Rotation2Df rot2nd_to_init_frame(CONFIG_init_theta);
-
-//     ROS_INFO("initial_pose.theta = %f", initial_pose.theta);
-//     ROS_INFO("trans_to_init = (%f, %f)", trans_to_init_frame.x(), trans_to_init_frame.y());
-//     ROS_INFO("CONFIG_init_theta = %f", CONFIG_init_theta);
-
-//     std::vector<Eigen::Vector2f> trans_scan;
-//     for (auto& point : curr_pose.scan){ 
-//       ROS_INFO("point = (%f, %f)", point.x(), point.y());
-//       Eigen::Vector2f point_in_initial_pose_after_1strot(rot1st_to_initial_pose * point);
-//       Eigen::Vector2f point_in_initial_pose_after_trans(point_in_initial_pose_after_1strot - trans_to_initial_pose);
-//       Eigen::Vector2f point_in_initial_pose_after_2ndrot(rot2nd_to_initial_pose * point_in_initial_pose_after_trans);
-      
-//       ROS_INFO("point_in_initial_pose_after_1strot = (%f, %f)", point_in_initial_pose_after_1strot.x(), point_in_initial_pose_after_1strot.y());
-//       ROS_INFO("point_in_initial_pose_after_trans = (%f, %f)", point_in_initial_pose_after_trans.x(), point_in_initial_pose_after_trans.y());
-//       ROS_INFO("point_in_initial_pose_after_2ndrot = (%f, %f)", point_in_initial_pose_after_2ndrot.x(), point_in_initial_pose_after_2ndrot.y());
-      
-      
-//       Eigen::Vector2f point_in_init_frame_after_trans(point_in_initial_pose_after_2ndrot - trans_to_init_frame);
-//       // Eigen::Vector2f point_in_init_frame_after_1strot(rot1st_to_init_frame * point_in_initial_pose_after_2ndrot);
-//       Eigen::Vector2f point_in_init_frame_after_2ndrot(rot2nd_to_init_frame * point_in_init_frame_after_trans);
-//       Eigen::Vector2f point_in_init_frame_after_trans2(point_in_init_frame_after_2ndrot + trans_to_init_frame);
-
-//       // ROS_INFO("point_in_init_frame_after_1strot = (%f, %f)", point_in_init_frame_after_1strot.x(), point_in_init_frame_after_1strot.y());
-//       ROS_INFO("point_in_init_frame_after_trans = (%f, %f)", point_in_init_frame_after_trans.x(), point_in_init_frame_after_trans.y());
-//       ROS_INFO("point_in_init_frame_after_2ndrot = (%f, %f)", point_in_init_frame_after_2ndrot.x(), point_in_init_frame_after_2ndrot.y());
-//       ROS_INFO("point_in_init_frame_after_trans2 = (%f, %f)", point_in_init_frame_after_trans2.x(), point_in_init_frame_after_trans2.y());
-
-//       trans_scan.push_back(point_in_init_frame_after_trans2);
-//       break;
-//     }
-//     map.insert(map.end(), trans_scan.begin(), trans_scan.end());
-//     break;
-//   }
-//   PrintPoses();
-//   return map;
-// }
-
 }  // namespace slam

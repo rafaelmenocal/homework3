@@ -80,9 +80,12 @@ class SLAM {
                                        const std::vector<Eigen::Vector2f>& curr_scan);
  
 
-  float_t FindMotionModelLogLikelihood(float x, 
-                                       float y, 
-                                       float theta, 
+  float_t FindMotionModelLogLikelihood(float x1,
+                                       float x2, 
+                                       float y1,
+                                       float y2,
+                                       float theta1,
+                                       float theta2,
                                        const Pose& curr_pose,
                                        const Pose& prev_pose);
   void PrintPoses();
