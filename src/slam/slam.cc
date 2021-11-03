@@ -230,7 +230,7 @@ float_t SLAM::FindObservationLogLikelihood(
     y_loc = std::min(0, y_loc);
     y_loc = std::max(y_loc, NUM_PIXELS - 1);
     
-    observation_liklihood += cost_table(y_loc, x_loc);
+    observation_liklihood *= cost_table(y_loc, x_loc);
   }
 
   return observation_liklihood;
@@ -368,14 +368,21 @@ void SLAM::ObserveLaser(const std::vector<float>& ranges,
       Eigen::MatrixXf xy_probs = y_probs_mat.transpose() * x_probs_mat;
   
       for (int x = 0; x < xy_probs.cols(); x++) {
+        float x_val = x_vals[x];
+
         for (int y = 0; y < xy_probs.rows(); y++) {
+          float y_val = y_vals[y];
           float xy_prob = xy_probs(y, x);
+
           for (int theta = 0; theta < static_cast<int>(theta_probs.size()); theta++) {
+            float theta_val = theta_vals[theta];
             float_t log_likelihood = xy_prob * theta_probs[theta];
+            log_likelihood *= FindObservationLogLikelihood(
+              x_val, y_val, theta_val, prev_pose, *cost_table_ptr, curr_pose.scan);
             if (log_likelihood > max_loglikelihood) {
               max_loglikelihood = log_likelihood;
               best_x = x_vals[x];
-              best_y = y_vals[x];
+              best_y = y_vals[y];
               best_theta = theta_vals[theta];
             }
           }
