@@ -18,6 +18,7 @@
 \author  Joydeep Biswas, (C) 2019
 */
 //========================================================================
+#include <fstream>
 
 #include "slam.h"
 
@@ -212,7 +213,8 @@ void SLAM::CreateCostTable(const std::vector<Eigen::Vector2f>& prev_scan,
   cost_table.setZero();
   
   for (const auto& point : prev_scan) {
-    // ROS_INFO("point = (%f, %f)", point.x(), point.y());    
+
+    ROS_INFO("point = (%f, %f)", point.x(), point.y());    
     // ROS_INFO("adjusted point = (%f, %f)", x, y);
     if ((point.x() <= 10.0 && point.x() >= -10.0)
         && (point.y() <= 10.0 && point.y() >= -10.0)) {
@@ -234,7 +236,12 @@ void SLAM::CreateCostTable(const std::vector<Eigen::Vector2f>& prev_scan,
       }
     }
   }
-  cost_table /= -cost_table.sum();
+  
+  std::ofstream file("test.txt");
+  if (file.is_open())
+  {
+    file << cost_table << '\n';
+  }
 }
 
 // Observation Likelihood: return log likelihood of how likely it is 
@@ -470,8 +477,8 @@ void SLAM::ObserveOdometry(const Eigen::Vector2f& odom_loc, const float odom_ang
 
 }
 
-vector<Vector2f> SLAM::GetMap() {
-  std::vector<Vector2f> map;
+vector<Eigen::Vector2f> SLAM::GetMap() {
+  std::vector<Eigen::Vector2f> map;
   // Reconstruct the map as a single aligned point cloud from all saved poses
   // and their respective scans.
 
@@ -493,7 +500,7 @@ vector<Vector2f> SLAM::GetMap() {
     for (auto& point : curr_pose.scan){ 
       Eigen::Vector2f point_after_rot(base_rot * point);
       Eigen::Vector2f point_after_trans = point_after_rot + del_trans;
-      Eigen::Vector2f point_after_final_trans = point_after_trans + Vector2f(initial_pose.x, initial_pose.y);
+      Eigen::Vector2f point_after_final_trans = point_after_trans + Eigen::Vector2f(initial_pose.x, initial_pose.y);
       ROS_INFO("point = (%f, %f)", point.x(), point.y());
       ROS_INFO("point_after_rot = (%f, %f)", point_after_rot.x(), point_after_rot.y());
       ROS_INFO("point_after_trans = (%f, %f)", point_after_trans.x(), point_after_trans.y());
