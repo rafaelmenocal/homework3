@@ -41,7 +41,7 @@ using namespace math_util;
 
 namespace slam {
 
-constexpr const int NUM_PIXELS = 100;
+constexpr const int NUM_PIXELS = 200;
 const int debug_odom = false;
 
 config_reader::ConfigReader config_reader_({"config/particle_filter.lua"});
@@ -307,7 +307,6 @@ void SLAM::ObserveLaser(const std::vector<float>& ranges,
 
     if (poses_.back().scan.size() == 0) {
       
-      auto t1 = ros::Time::now().toSec();
       poses_.back().scan = observed_scan;
       Pose curr_pose = poses_.back();
       auto prev_pose_iter = poses_.end();
@@ -383,23 +382,7 @@ void SLAM::ObserveLaser(const std::vector<float>& ranges,
 
         }
       }
-      auto t2 = ros::Time::now().toSec();
-      ROS_INFO("%f", t2 - t1);
-      // for (float x_i = -x_width + curr_pose.x; x_i <= x_width + curr_pose.x; x_i += x_inc) {
-      //   for (float y_i = -y_width + curr_pose.y; y_i <= y_width + curr_pose.y; y_i += y_inc) {
-      //     for (float theta_i = -theta_width + curr_pose.theta; theta_i <= theta_width + curr_pose.theta; theta_i += theta_inc) {
-            
-      //       float_t log_ol = FindObservationLogLikelihood(x_i, y_i, theta_i, prev_pose, *cost_table_ptr, curr_pose.scan);
-      //       float_t log_mm = FindMotionModelLogLikelihood(
-      //         x_i, x_i + x_inc, y_i, y_i + y_inc, theta_i, theta_i + theta_inc,
-      //         curr_pose, prev_pose);
 
-      //       float_t log_likelihood = log_ol * log_mm;
-            
-      //       i
-      //     }
-      //   }
-      // }
       curr_pose.x = best_x;
       curr_pose.y = best_y;
       curr_pose.theta = best_theta;
