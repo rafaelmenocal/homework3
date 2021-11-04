@@ -14,6 +14,7 @@ for line in text.splitlines():
 import numpy as np
 
 data = np.array(rows)
+data = 1 - data
 print(data.shape)
-plt.matshow(data)
+plt.matshow(data, cmap='Greys')
 plt.show()
