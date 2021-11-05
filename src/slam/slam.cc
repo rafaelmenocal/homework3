@@ -134,27 +134,34 @@ double_t SLAM::FindObservationLogLikelihood(
   const Eigen::MatrixXd& cost_table, const std::vector<Eigen::Vector2f>& curr_scan) {
 
   double_t observation_liklihood = 0.0;
-  double_t resolution = NUM_PIXELS / 20.0;  // 100 px / (10 * 2)m
+  double_t resolution = (double_t)NUM_PIXELS / 20.0;  // 100 px / (10 * 2)m
 
   // Translation and rotation to move point in new scan back to frame of previous scan.
-  Eigen::Vector2f translation(x - prev_pose.x, y - prev_pose.y);
-  Eigen::Rotation2Df rot(-(theta - prev_pose.theta));
+  //Eigen::Vector2f translation(x - prev_pose.x, y - prev_pose.y);
+  //double_t angle = -(theta - prev_pose.theta);
   for (const auto& point : curr_scan) {
-    Eigen::Vector2f trans_point = rot * (point - translation);
+    // Eigen::Vector2f trans_point(
+    //   (cos(angle) * point.x()) +  (sin(angle) * point.x()) + (-translation.x() * point.x()),
+    //   (-sin(angle) * point.y()) +  (cos(angle) * point.y()) + (-translation.y() * point.y()));
+    Eigen::Vector2f trans_point(point);
+
     // Since (0, 0) is in the upper left hand corner of the rasterized cost table, we
     // need to ensure the Cartesian to pixel transform is proper. For x, we just shift
     // the point over by half the x width.
     int x_loc = static_cast<int>(resolution * (trans_point.x() + 10));
-    x_loc = std::min(0, x_loc);
-    x_loc = std::max(x_loc, NUM_PIXELS - 1);
-
     // point.y() \in [-10, 10]. Flip over y axis
     int y_loc = static_cast<int>(resolution * (-trans_point.y() + 10));
-    y_loc = std::min(0, y_loc);
-    y_loc = std::max(y_loc, NUM_PIXELS - 1);
-    
-    observation_liklihood *= cost_table(y_loc, x_loc);
+    x_loc = std::max(0, x_loc);
+    x_loc = std::min(x_loc, NUM_PIXELS - 1);
+
+    y_loc = std::max(0, y_loc);
+    y_loc = std::min(y_loc, NUM_PIXELS - 1);
+    observation_liklihood += cost_table(y_loc, x_loc);
   }
+  if (observation_liklihood != 0.0) {
+    ROS_INFO("%.30f:", observation_liklihood);
+  }
+  
 
   return observation_liklihood;
 }
@@ -210,13 +217,14 @@ void SLAM::ObserveLaser(const std::vector<float>& ranges,
       double_t dtheta_odom = curr_pose.theta - prev_pose.theta;
 
       double_t std = sqrt(pow(dx_odom, 2) + pow(dy_odom, 2));
-      std += 10000.0 * abs(dtheta_odom);
+      std += abs(dtheta_odom);
+      std *= .01;
 
       std::vector<double> x_probs, x_vals;
       x_probs.reserve(static_cast<int>(resolution));
       double_t dx_mean = curr_pose.x - prev_pose.x;
       for (double_t x_i = -x_width + curr_pose.x; x_i <= x_width + curr_pose.x; x_i += x_inc) {
-          x_probs.push_back(SLAM:: MotionModelProb(x_i, x_i + x_inc, dx_mean, std));
+          x_probs.push_back(SLAM::MotionModelProb(x_i, x_i + x_inc, dx_mean, std));
           x_vals.push_back(x_i);
       }
       Eigen::MatrixXd x_probs_mat(1, x_probs.size());
