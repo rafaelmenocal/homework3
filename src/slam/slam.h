@@ -19,74 +19,148 @@
 */
 //========================================================================
 
+#ifndef __SRC_SLAM_SLAM_H__
+#define __SRC_SLAM_SLAM_H__
+
 #include <algorithm>
 #include <vector>
 #include <memory>
 
+#include "ros/ros.h"
+
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
 
-#ifndef SRC_SLAM_H_
-#define SRC_SLAM_H_
-
 namespace slam {
 
-struct Pose {
-  float_t x;
-  float_t y;
-  float_t theta;
-  std::vector<Eigen::Vector2f> scan;
-};
+typedef std::shared_ptr<std::vector<Eigen::Vector2f>> scan_ptr;
 
+struct Pose {
+  double_t x;
+  double_t y;
+  double_t theta;
+  scan_ptr scan;
+
+  Pose(double_t x, double_t y, double_t theta) : x(x), y(y), theta(theta) {}
+
+};
+struct PoseObservation {
+  double_t obsliklihood;
+  Eigen::MatrixXd cost_table;
+
+  PoseObservation(double_t o, Eigen::MatrixXd m) : obsliklihood(o), cost_table(m) {};
+};
 class SLAM {
  public:
   // Default Constructor.
   SLAM();
 
-  // Called to update variables based on odometry
-  void UpdateOdometry(const Eigen::Vector2f& odom_loc, const float odom_angle);
-
   // Observe a new laser scan.
   void ObserveLaser(const std::vector<float>& ranges,
-                    float range_min,
-                    float range_max,
-                    float angle_min,
-                    float angle_max);
+                    double_t range_min,
+                    double_t range_max,
+                    double_t angle_min,
+                    double_t angle_max);
 
-  // Observe new odometry-reported location.
-  void ObserveOdometry(const Eigen::Vector2f& odom_loc, const float odom_angle);
+  /* Return last pose recorded
+   *
+   * @param loc: vector to full with (x, y) of pose
+   * @param angle: float to fill with angle
+   */
+  inline void GetPose(Eigen::Vector2f* loc, float* angle) const {
+    // Return the latest pose estimate of the robot.
+    if (poses_.size() != 0) {
+      *loc = Eigen::Vector2f(poses_.back().x, poses_.back().y);
+      *angle = poses_.back().theta;
+    }
+  };
 
-  // Get latest map.
-  std::vector<Eigen::Vector2f> GetMap();
+  /* Turn the vector of ranges into a proper LIDAR scan
+   *
+   * @param ranges: distances along each ray in the scan
+   * @param range_min: the minimum possible range
+   * @param range_max: the maximum possible range
+   * @param angle_min: starting angle of the scan
+   * @param angle_max: ending angle of the can
+   * @param obs_scan_ptr: pose's scan to populate
+   */
+  void GetObservedPointCloud(const std::vector<double>& ranges,
+                             double_t range_min,
+                             double_t range_max,
+                             double_t angle_min,
+                             double_t angle_max,
+                             scan_ptr& obs_scan_ptr,
+                             Pose& pose);
 
-  // Get latest robot pose.
-  void GetPose(Eigen::Vector2f* loc, float* angle) const;
+  /*
+   * Get the probability from a normal CDF
+   *
+   * @param val: the value to sample
+   * @param mean: mean value of the normal distribution
+   * @param std_dev: standard deviation of the distribution
+   */
+  inline double_t GetNormalProb(double_t val, double_t mean, double_t std_dev) {
+    return 0.5 * (1 + erf((val - mean) / (sqrt(2) * std_dev)));
+  }
 
-  void GetObservedPointCloud(const std::vector<float>& ranges,
-                             float range_min,
-                             float range_max,
-                             float angle_min,
-                             float angle_max,
-                             std::vector<Eigen::Vector2f>* obs_scan_ptr);
+  /*
+   * Find P(a < x < b)
+   *
+   * @param val1: the left bound (a)
+   * @param val2: the right bound (a)
+   * @param mean: mean value of the normal distribution
+   * @param std_dev: standard deviation of the distribution
+   */
+  inline double_t MotionModelProb(double_t val1,
+                                  double_t val2,
+                                  double_t mean,
+                                  double_t std) {
+    // ROS_INFO("val2: %f, val1: %f, mean: %f", val2, val1, mean);
+    // ROS_INFO("p2: %.40f",SLAM::GetNormalProb(val2 - mean, mean, std));
+    // ROS_INFO("p1: %.40f",SLAM::GetNormalProb(val1 - mean, mean, std));
+
+    // return (SLAM::GetNormalProb(val2 - mean, mean, std)
+    //          - SLAM::GetNormalProb(val1 - mean, mean, std));
+
+    return (1 / (std * sqrt(2 * M_PI))) * exp(-0.5 * pow((val1 - mean) / std, 2.0));
+  }
+
 
   void CreateCostTable(const std::vector<Eigen::Vector2f>& prev_scan,
                        std::shared_ptr<Eigen::MatrixXd>& cost_table_ptr);
 
-  float_t FindObservationLogLikelihood(float x, 
-                                       float y, 
-                                       float theta, 
-                                       const Pose& prev_pose,
-                                       const Eigen::MatrixXd& cost_table, 
-                                       const std::vector<Eigen::Vector2f>& curr_scan);
+  PoseObservation FindObservationLogLikelihood(double_t x, 
+                                        double_t y, 
+                                        double_t theta,
+                                        const Pose prev_pose,
+                                        Eigen::MatrixXd cost_table, 
+                                        const std::vector<Eigen::Vector2f>& curr_scan, 
+                                        int c,
+                                        bool plot = false);
  
-
-  float_t FindMotionModelLogLikelihood(float x, 
-                                       float y, 
-                                       float theta, 
-                                       const Pose& curr_pose,
-                                       const Pose& prev_pose);
   void PrintPoses();
-  
+  double_t FindMotionModelLogLikelihood(double_t x1,
+                                        double_t x2, 
+                                        double_t y1,
+                                        double_t y2,
+                                        double_t theta1,
+                                        double_t theta2,
+                                        const Pose curr_pose,
+                                        const Pose prev_pose);
+
+  /*
+  * Take in the latest odometry reading. Only record the new odometry if the
+  * robot has moved a certain amount.
+  * 
+  * @param: odometry location of the robot
+  * @param: odometry angle of the robot
+  */
+  void ObserveOdometry(const Eigen::Vector2f& odom_loc, const double_t odom_angle);
+
+  /*
+   * Reconstruct the map using the optimized poses.
+   */
+  std::vector<Eigen::Vector2f> GetMap();
 
  private:
 
@@ -94,47 +168,12 @@ class SLAM {
   std::vector<Pose> poses_;
 
   // Previous odometry-reported locations.
-  Eigen::Vector2f prev_odom_loc_;
-  float prev_odom_angle_;
-  bool odom_initialized_;
-
-  Eigen::Vector2f curr_odom_loc_;
-  float curr_odom_angle_;
-  double curr_time_;
-  double prev_time_;
-  double del_time_;
-  
-  Eigen::Vector2f del_odom_loc_;
-  
-  Eigen::Vector2f prev_odom_vel2f_;
-  Eigen::Vector2f odom_vel2f_;
-  Eigen::Vector2f odom_accel2f_;
-  float odom_vel_;
-  float odom_accel_;
-  float del_odom_angle_;
-  float odom_omega_;
-
   Eigen::Vector2f prev_update_loc_;
-  float prev_update_angle_;
+  double_t prev_update_angle_;
 
-  // A few small helper functions.
-  inline float_t Vel2fToVel() const {
-    return sqrt(pow(odom_vel2f_.x(), 2) + pow(odom_vel2f_.y(), 2));
-  };
+  int c_ = 0;
 
-  inline float_t Accel2fToAccel() const {
-    return sqrt(pow(odom_accel2f_.x(), 2) + pow(odom_accel2f_.y(), 2));
-  }
-
-  inline Eigen::Vector2f GetOdomVel2f() const {
-    return (1.0 / del_time_) * 
-      Eigen::Vector2f(curr_odom_loc_.x() - prev_odom_loc_.x(), curr_odom_loc_.y() - prev_odom_loc_.y());
-  }
-
-  inline Eigen::Vector2f GetOdomAccel2f() const {
-    return (prev_odom_vel2f_ - odom_vel2f_) * del_time_;
-  }
 };
 }  // namespace slam
 
-#endif   // SRC_SLAM_H_
+#endif   // __SRC_SLAM_SLAM_H__
