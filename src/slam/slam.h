@@ -40,16 +40,28 @@ struct Pose {
   double_t y;
   double_t theta;
   scan_ptr scan;
+  double_t theta_map;
+  Eigen::Vector2f t_map;
 
   Pose(double_t x, double_t y, double_t theta) : x(x), y(y), theta(theta) {}
 
+  bool operator ==(const Pose& p1) const {
+    return (p1.x == x) && (p1.y == y) && (p1.theta == theta) && (p1.scan == scan);
+  }
+
+  bool operator !=(const Pose& p1) const {
+    return (p1.x != x) || (p1.y != y) || (p1.theta != theta) || (p1.scan != scan);
+  }
+
 };
+
 struct PoseObservation {
   double_t obsliklihood;
   Eigen::MatrixXd cost_table;
 
   PoseObservation(double_t o, Eigen::MatrixXd m) : obsliklihood(o), cost_table(m) {};
 };
+
 class SLAM {
  public:
   // Default Constructor.
@@ -67,13 +79,7 @@ class SLAM {
    * @param loc: vector to full with (x, y) of pose
    * @param angle: float to fill with angle
    */
-  inline void GetPose(Eigen::Vector2f* loc, float* angle) const {
-    // Return the latest pose estimate of the robot.
-    if (poses_.size() != 0) {
-      *loc = Eigen::Vector2f(poses_.back().x, poses_.back().y);
-      *angle = poses_.back().theta;
-    }
-  };
+  void GetPose(Eigen::Vector2f* loc, float* angle);
 
   /* Turn the vector of ranges into a proper LIDAR scan
    *
@@ -112,7 +118,6 @@ class SLAM {
    * @param std_dev: standard deviation of the distribution
    */
   inline double_t MotionModelProb(double_t val1,
-                                  double_t val2,
                                   double_t mean,
                                   double_t std) {
     // ROS_INFO("val2: %f, val1: %f, mean: %f", val2, val1, mean);
