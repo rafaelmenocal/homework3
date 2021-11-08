@@ -19,15 +19,17 @@
 */
 //========================================================================
 
+#ifndef __SRC_SLAM_SLAM_H__
+#define __SRC_SLAM_SLAM_H__
+
 #include <algorithm>
 #include <vector>
 #include <memory>
 
+#include "ros/ros.h"
+
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
-
-#ifndef __SRC_SLAM_SLAM_H__
-#define __SRC_SLAM_SLAM_H__
 
 namespace slam {
 
@@ -42,7 +44,12 @@ struct Pose {
   Pose(double_t x, double_t y, double_t theta) : x(x), y(y), theta(theta) {}
 
 };
+struct PoseObservation {
+  double_t obsliklihood;
+  Eigen::MatrixXd cost_table;
 
+  PoseObservation(double_t o, Eigen::MatrixXd m) : obsliklihood(o), cost_table(m) {};
+};
 class SLAM {
  public:
   // Default Constructor.
@@ -82,7 +89,8 @@ class SLAM {
                              double_t range_max,
                              double_t angle_min,
                              double_t angle_max,
-                             scan_ptr& obs_scan_ptr);
+                             scan_ptr& obs_scan_ptr,
+                             Pose& pose);
 
   /*
    * Get the probability from a normal CDF
@@ -107,30 +115,38 @@ class SLAM {
                                   double_t val2,
                                   double_t mean,
                                   double_t std) {
-    return (SLAM::GetNormalProb(val2 - mean, mean, std)
-             - SLAM::GetNormalProb(val1 - mean, mean, std));
+    // ROS_INFO("val2: %f, val1: %f, mean: %f", val2, val1, mean);
+    // ROS_INFO("p2: %.40f",SLAM::GetNormalProb(val2 - mean, mean, std));
+    // ROS_INFO("p1: %.40f",SLAM::GetNormalProb(val1 - mean, mean, std));
+
+    // return (SLAM::GetNormalProb(val2 - mean, mean, std)
+    //          - SLAM::GetNormalProb(val1 - mean, mean, std));
+
+    return (1 / (std * sqrt(2 * M_PI))) * exp(-0.5 * pow((val1 - mean) / std, 2.0));
   }
 
 
   void CreateCostTable(const std::vector<Eigen::Vector2f>& prev_scan,
                        std::shared_ptr<Eigen::MatrixXd>& cost_table_ptr);
 
-  double_t FindObservationLogLikelihood(double_t x, 
+  PoseObservation FindObservationLogLikelihood(double_t x, 
                                         double_t y, 
-                                        double_t theta, 
-                                        const Pose& prev_pose,
-                                        const Eigen::MatrixXd& cost_table, 
-                                        const std::vector<Eigen::Vector2f>& curr_scan);
+                                        double_t theta,
+                                        const Pose prev_pose,
+                                        Eigen::MatrixXd cost_table, 
+                                        const std::vector<Eigen::Vector2f>& curr_scan, 
+                                        int c,
+                                        bool plot = false);
  
-
+  void PrintPoses();
   double_t FindMotionModelLogLikelihood(double_t x1,
                                         double_t x2, 
                                         double_t y1,
                                         double_t y2,
                                         double_t theta1,
                                         double_t theta2,
-                                        const Pose& curr_pose,
-                                        const Pose& prev_pose);
+                                        const Pose curr_pose,
+                                        const Pose prev_pose);
 
   /*
   * Take in the latest odometry reading. Only record the new odometry if the
@@ -154,6 +170,8 @@ class SLAM {
   // Previous odometry-reported locations.
   Eigen::Vector2f prev_update_loc_;
   double_t prev_update_angle_;
+
+  int c_ = 0;
 
 };
 }  // namespace slam
