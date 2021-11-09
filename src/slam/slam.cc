@@ -222,13 +222,13 @@ float_t SLAM::FindObservationLogLikelihood(
     // need to ensure the Cartesian to pixel transform is proper. For x, we just shift
     // the point over by half the x width.
     int x_loc = static_cast<int>(resolution * (trans_point.x() + 10));
-    x_loc = std::min(0, x_loc);
-    x_loc = std::max(x_loc, NUM_PIXELS - 1);
+    x_loc = std::max(0, x_loc);
+    x_loc = std::min(x_loc, NUM_PIXELS - 1);
 
     // point.y() \in [-10, 10]. Flip over y axis
     int y_loc = static_cast<int>(resolution * (-trans_point.y() + 10));
-    y_loc = std::min(0, y_loc);
-    y_loc = std::max(y_loc, NUM_PIXELS - 1);
+    y_loc = std::max(0, y_loc);
+    y_loc = std::min(y_loc, NUM_PIXELS - 1);
     
     observation_liklihood += cost_table(y_loc, x_loc);
   }
