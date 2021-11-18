@@ -70,20 +70,36 @@ class SLAM {
                              float angle_max,
                              std::vector<Eigen::Vector2f>* obs_scan_ptr);
 
-  Eigen::Matrix2d CreateCostTable(std::vector<Eigen::Vector2f> prev_scan);
+  void UpdateCostTable(std::vector<Eigen::Vector2f> prev_scan);
 
   float FindObservationLogLikelihood(float x, 
                                      float y, 
-                                     float theta, 
-                                     Eigen::Matrix2d cost_table, 
-                                     std::vector<Eigen::Vector2f> curr_scan);
+                                     float theta,
+                                     Pose& prev_pose, 
+                                     std::vector<Eigen::Vector2f>& curr_scan);
  
 
-  float FindMotionModelLogLikelihood(float x, 
-                                     float y, 
-                                     float theta, 
-                                     Pose curr_pose);
-  
+  float_t FindMotionModelLogLikelihood(float x,
+                                       float y,
+                                       float theta,
+                                       const Pose& curr_pose,
+                                       const Pose& prev_pose);
+
+  void PrintPoses();
+
+  void SaveCostTable(std::string file_name);
+
+  void SaveRGBCostTable(std::string file_name, float r, float g, float b);
+
+  void InitializeGuassianKernel();
+
+  void PrintGaussianKernel();
+
+  void MergeAndSaveBestCostTable(float x, 
+                                 float y, 
+                                 float theta,
+                                 Pose& prev_pose,
+                                 std::vector<Eigen::Vector2f>& curr_scan);
 
  private:
 
