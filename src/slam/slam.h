@@ -99,7 +99,8 @@ class SLAM {
                                  float y, 
                                  float theta,
                                  Pose& prev_pose,
-                                 std::vector<Eigen::Vector2f>& curr_scan);
+                                 std::vector<Eigen::Vector2f>& curr_scan,
+                                 std::string file_name);
 
  private:
 
